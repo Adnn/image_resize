@@ -1,47 +1,72 @@
 #!/usr/bin/env python
-from PIL import Image
+from PIL import Image, ExifTags
+import piexif
+from termcolor import colored
 
+import argparse
 import os
 
-IDEAL_SIZE = (2288, 1525) # real 3:2
-JPG_QUALITY = 95
-DEST = "resized"
 # Found using PIL ExifTags, following the method from: https://stackoverflow.com/a/26928142/1027706
+# They are not required anymore, since we use piexif additional module
 EXIF_ORIENTATION = 274
+EXIF_IMAGEWIDTH  = 40962
+EXIF_IMAGEHEIGHT = 40963
 
 def is_landscape(image):
-    print("x:{} y:{}".format(image.size[0], image.size[1]))
     return image.size[0] >= image.size[1]
+
+def print_warn(msg):
+    print(colored("\tWARNING: {}".format(msg), "yellow"))
+
+def print_info(msg):
+    print("\tINFO: {}".format(msg))
 
 if __name__ == "__main__":
 
-    if not os.path.exists(DEST):
-        os.mkdir(DEST)
+    parser = argparse.ArgumentParser("Resizes all images from working directory preserving aspect"
+                                     " ratio, with target size as lower bounds")
+    parser.add_argument("destination", help="The folder where modified images are saved")
+    parser.add_argument("-t", "--target", help="Target size with format \"x,y\" (lower bounds)",
+                        default="2288,1525") # real 3:2
+    parser.add_argument("-q", "--quality", type=int, help="Jpeg quality", default=95) # real 3:2
+    parser.add_argument("--keep-gps", help="Maintain GPS data", action="store_true")
+    args = parser.parse_args()
 
-    #for filename in [fn for fn in os.listdir()]:
-    #    print("{}".format(os.path.splitext(filename)[1]))
-    for image, filename in [(Image.open(fn), fn) for fn in os.listdir() if os.path.splitext(fn)[1] in (".jpg", ".jpeg")]:
-        x = image.size[0]
-        y = image.size[1]
+    if not os.path.exists(args.destination):
+        os.mkdir(args.destination)
 
-        # We must "bake" the rotation into the image, because PIL does not forward the EXIF info into the output
-        exif = dict(image._getexif().items())
-        try:
-            rotation = exif[EXIF_ORIENTATION]
-        except KeyError:
-            rotation = 0
+    target = [int(dimension) for dimension in args.target.split(",")]
 
-        if (rotation == 6): # The image is rotated 90° clockwise when presented
-            image = image.rotate(90*3, expand=True) # It must be rotated 270° counter clockwise to be up
-        elif (rotation == 8): # The image is rotated 90° counterclockwise when presented
-            image = image.rotate(90, expand=True) # It must be rotated 90° counter clockwise to be up
+    for image, filename in [(Image.open(fn), fn) for fn in os.listdir()
+                                if os.path.splitext(fn)[1] in (".jpg", ".jpeg")]:
+        (x, y) = (image.size[0], image.size[1])
+        print("File: \'{}\' with size ({}, {}), ratio {}".format(filename, x, y, max(x, y)/min(x, y)))
 
-        target = IDEAL_SIZE if is_landscape(image) else (IDEAL_SIZE[1], IDEAL_SIZE[0])
+        # Pillow does not forward the EXIF info into the output, we do that manually
+        # Getting exif dictionary from Pillow, we did not find a way to save it back
+        #exif_dict = dict(image._getexif().items())
+        exif_dict = piexif.load(image.info["exif"])
 
-        resize_ratio = max(target[0]/x, target[1]/y)
-        resized_image = \
-            image.resize([round(dimension * resize_ratio) for dimension in image.size], resample=Image.LANCZOS)
-        print("Input ratio: {}. New size with ratio of {} is {}".format(max(x, y)/min(x, y), resize_ratio, resized_image.size))
+        # If the image is portrait, the target dimensions are reversed
+        if not is_landscape(image):
+            target.reverse()
 
-        destination = os.path.join(DEST, os.path.basename(filename))
-        resized_image.save(destination , fomat="JPEG", quality=JPG_QUALITY)
+        factor = max(target[0]/image.size[0], target[1]/image.size[1])
+
+        if factor >= 1:
+            print_warn("Image already smaller than the target, ignoring resize factor {}".format(factor))
+        else:
+            print_info("Resize factor: {}".format(factor))
+            new_size = [round(d*factor) for d in image.size]
+            image = image.resize(new_size, resample=Image.LANCZOS)
+            exif_dict["Exif"][EXIF_IMAGEWIDTH] = new_size[0]
+            exif_dict["Exif"][EXIF_IMAGEHEIGHT] = new_size[1]
+            # Equivalent :
+            #exif_dict["Exif"][piexif.ExifIFD.PixelYDimension] = new_size[1]
+
+        if not args.keep_gps:
+            del exif_dict["GPS"]
+
+        destination = os.path.join(args.destination, os.path.basename(filename))
+        image.save(destination , fomat="JPEG", quality=args.quality, exif=piexif.dump(exif_dict))
+        print_info("Final size ({})".format(image.size))
