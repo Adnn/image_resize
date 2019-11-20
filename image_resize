@@ -1,0 +1,7 @@
+#!/bin/bash
+
+script_path=$(dirname "$(readlink -n "$0")" | tr -d '\n')
+
+source "$script_path/venv/bin/activate"
+"$script_path/main.py" "$@"
+deactivate
