@@ -18,6 +18,9 @@ def is_landscape(image):
 def print_warn(msg):
     print(colored("\tWARNING: {}".format(msg), "yellow"))
 
+def print_alarm(msg):
+    print(colored("\tATTENTION: {}".format(msg), "red"))
+
 def print_info(msg):
     print("\tINFO: {}".format(msg))
 
@@ -28,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument("destination", help="The folder where modified images are saved")
     parser.add_argument("-t", "--target", help="Target size with format \"x,y\" (lower bounds)",
                         default="2288,1525") # real 3:2
-    parser.add_argument("-q", "--quality", type=int, help="Jpeg quality", default=95) # real 3:2
+    parser.add_argument("-q", "--quality", type=int, help="Jpeg quality", default=83)
     parser.add_argument("--keep-gps", help="Maintain GPS data", action="store_true")
     args = parser.parse_args()
 
@@ -40,7 +43,9 @@ if __name__ == "__main__":
     for image, filename in [(Image.open(fn), fn) for fn in os.listdir()
                                 if os.path.splitext(fn)[1] in (".jpg", ".jpeg")]:
         (x, y) = (image.size[0], image.size[1])
-        print("File: \'{}\' with size ({}, {}), ratio {}".format(filename, x, y, max(x, y)/min(x, y)))
+        source_filesize = os.path.getsize(filename)
+        print("File: \'{}\' with dimensions ({}, {}), ratio {:.2f}, filesize {} kB"
+                .format(filename, x, y, max(x, y)/min(x, y), int(source_filesize/1024)))
 
         # Pillow does not forward the EXIF info into the output, we do that manually
         # Getting exif dictionary from Pillow, we did not find a way to save it back
@@ -68,5 +73,12 @@ if __name__ == "__main__":
             del exif_dict["GPS"]
 
         destination = os.path.join(args.destination, os.path.basename(filename))
-        image.save(destination , fomat="JPEG", quality=args.quality, exif=piexif.dump(exif_dict))
-        print_info("Final size ({})".format(image.size))
+        image.save(destination, format="JPEG", quality=args.quality, exif=piexif.dump(exif_dict))
+        destination_filesize = os.path.getsize(destination)
+        print_info("Final dimensions {}, filesize {} kB (compression ratio {:.1f}%)"
+                .format(image.size,
+                        int(destination_filesize/1024),
+                        destination_filesize*100/source_filesize))
+
+        if (destination_filesize > source_filesize):
+            print_alarm("Resulting image is larger in filesize !")
