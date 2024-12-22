@@ -72,6 +72,13 @@ if __name__ == "__main__":
         if not args.keep_gps:
             del exif_dict["GPS"]
 
+        # Workaround a crash when dumping the exif data:
+        # https://github.com/hMatoba/Piexif/issues/95#issuecomment-1837090449
+        # https://github.com/Greegko/google-metadata-matcher/pull/7/commits/c7378fec7dd57622574b7444349c9a1a14bec0c1
+        scene_type = piexif.ExifIFD.SceneType
+        if scene_type in exif_dict['Exif'] and isinstance(exif_dict['Exif'][scene_type], int):
+            exif_dict['Exif'][scene_type] = str(exif_dict['Exif'][scene_type]).encode('utf-8')
+
         destination = os.path.join(args.destination, os.path.basename(filename))
         image.save(destination, format="JPEG", quality=args.quality, exif=piexif.dump(exif_dict))
         destination_filesize = os.path.getsize(destination)
